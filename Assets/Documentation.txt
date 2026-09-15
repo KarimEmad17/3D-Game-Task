@@ -1,0 +1,719 @@
+# Unity Platformer — Technical Task
+
+## 1. Overview
+
+This project is a small 3D platformer developed as part of the Unity Developer technical task for Thaka International.
+
+The main goal of the project is to demonstrate:
+
+* Clean and maintainable Unity architecture
+* Separation of responsibilities
+* Player movement and combat interactions
+* Enemy AI
+* Health and damage systems
+* Collectibles
+* Checkpoints and respawning
+* Save/load functionality
+* Scene management
+* Game state management
+
+The project focuses more on code structure and gameplay systems than visual complexity.
+
+---
+
+# 2. Gameplay
+
+The player explores a single level containing:
+
+* Platforms
+* Coins
+* Enemies
+* Checkpoints
+* A level endpoint
+
+### Player
+
+The player can:
+
+* Move
+* Run
+* Jump
+* Take damage
+* Die
+* Respawn at the latest checkpoint
+* Collect coins
+
+### Enemies
+
+Two enemy behaviors are supported:
+
+#### Patrol Enemy
+
+The enemy moves between two predefined points.
+
+Point A → Point B → Point A → Point B
+
+#### Chasing Enemy
+
+The enemy normally patrols between two points.
+
+When the player enters its detection area:
+
+Patrol
+   ↓
+Player detected
+   ↓
+Chase
+   ↓
+Player leaves detection area
+   ↓
+Patrol
+
+### Enemy Stomp
+
+The player can defeat an enemy by landing on its head while falling.
+
+The enemy uses a separate head hitbox to detect the stomp interaction.
+
+---
+
+# 3. Project Architecture
+
+The project uses a component-based architecture where each system has a clear responsibility.
+
+Game
+│
+├── GameManager
+├── SaveManager
+├── CoinManager
+├── CheckpointManager
+│
+├── Player
+│   ├── PlayerController
+│   ├── PlayerRespawn
+│   └── PlayerHealth
+│
+├── Enemies
+│   ├── Enemy
+│   ├── EnemyAI
+│   ├── EnemyDetection
+│   └── EnemyHeadHit
+│
+├── Collectibles
+│   └── Coin
+│
+└── Level
+    └── LevelEndPoint
+
+---
+
+# 4. Core Systems
+
+## GameManager
+
+`GameManager` controls the overall game flow.
+
+### Responsibilities
+
+* Start a new game
+* Continue an existing game
+* Load the game scene
+* Complete the level
+* Return to the main menu
+* Quit the application
+
+The `GameManager` persists between scenes using:
+
+DontDestroyOnLoad(gameObject);
+
+---
+
+## SaveManager
+
+`SaveManager` is responsible for persistence.
+
+The save system follows a centralized approach:
+
+SaveManager
+     │
+     ▼
+  SaveData
+     │
+     ├── CoinManager
+     ├── CheckpointManager
+     └── Other Saveable Systems
+
+The `SaveManager`:
+
+* Loads save data once
+* Keeps the current `SaveData` in memory
+* Saves data when requested
+* Notifies registered saveable objects through `ISaveable`
+
+Save data is stored as JSON using:
+
+
+Application.persistentDataPath
+
+---
+
+## SaveData
+
+`SaveData` is a serializable data container.
+
+Current saved information includes:
+
+public int coins;
+public List<string> collectedCoinIDs;
+public string checkpointID;
+```
+
+Example:
+
+
+{
+    "coins": 5,
+    "collectedCoinIDs": [
+        "coin_01",
+        "coin_03",
+        "coin_05"
+    ],
+    "checkpointID": "checkpoint_02"
+}
+
+---
+
+## ISaveable
+
+`ISaveable` provides a common interface for systems that need to participate in saving.
+
+
+public interface ISaveable
+{
+    void Save(SaveData data);
+    void Load(SaveData data);
+}
+
+This allows the `SaveManager` to work with different systems without knowing their implementation details.
+
+---
+
+# 5. Coin System
+
+The coin system is divided into two responsibilities.
+
+### Coin
+
+Responsible for:
+
+* Detecting player collision
+* Identifying itself
+* Marking itself as collected
+* Disabling itself after collection
+
+### CoinManager
+
+Responsible for:
+
+* Maintaining the player's total coin count
+* Adding coins
+* Saving/loading the total coin count
+
+Architecture:
+
+Player
+   ↓
+Coin
+   ↓
+CoinManager
+   ↓
+Coin count
+
+Each coin has a unique persistent ID.
+
+This allows the save system to remember exactly which coins were collected.
+
+For example:
+
+coin_01 → collected
+coin_02 → not collected
+coin_03 → collected
+
+When the game is loaded, only the previously collected coins are disabled.
+
+---
+
+# 6. Player Health
+
+`PlayerHealth` is responsible for:
+
+* Current HP
+* Taking damage
+* Damage cooldown
+* Death
+
+The enemy does not directly manipulate the player's HP.
+
+Instead:
+
+
+Enemy
+   ↓
+PlayerHealth.TakeDamage(1)
+
+A damage cooldown prevents the player from losing multiple HP instantly while remaining in contact with an enemy.
+
+Example:
+
+Enemy collision
+      ↓
+   -1 HP
+      ↓
+Damage cooldown
+      ↓
+Wait
+      ↓
+Can receive damage again
+
+---
+
+# 7. Checkpoint System
+
+The checkpoint system allows the player to respawn at the latest activated checkpoint.
+
+### Checkpoint
+
+Responsible for detecting when the player enters it.
+
+### CheckpointManager
+
+Responsible for:
+
+* Registering checkpoints
+* Tracking the current checkpoint
+* Saving the checkpoint ID
+* Loading the checkpoint
+* Providing the respawn location
+
+Flow:
+
+Player
+   ↓
+Checkpoint
+   ↓
+CheckpointManager
+   ↓
+Current Checkpoint
+   ↓
+SaveManager
+
+If the player reaches:
+
+```text
+Checkpoint 1
+      ↓
+Checkpoint 2
+      ↓
+Checkpoint 3
+```
+
+Checkpoint 3 becomes the current respawn point.
+
+If the player dies, they respawn at Checkpoint 3.
+
+---
+
+# 8. Enemy Architecture
+
+The enemy system uses inheritance for shared enemy functionality.
+
+## Enemy
+
+The base `Enemy` class contains shared functionality such as:
+
+* NavMeshAgent reference
+* Patrol points
+* Current patrol point
+* Patrol movement
+
+## EnemyAI
+
+`EnemyAI` extends `Enemy` and adds state-based behavior.
+
+public enum EnemyState
+{
+    Patrol,
+    Chase
+}
+
+The enemy switches between:
+
+PATROL
+   ↕
+CHASE
+
+This keeps common patrol functionality in the base class while allowing specialized behavior in the derived class.
+
+---
+
+# 9. Enemy Detection
+
+Enemy detection is handled by a separate trigger collider.
+
+Enemy
+├── Model
+├── NavMeshAgent
+└── DetectionArea
+      └── BoxCollider (Is Trigger)
+
+When the player enters the detection area:
+
+OnTriggerEnter
+      ↓
+StartChasing()
+
+When the player leaves:
+
+OnTriggerExit
+      ↓
+StopChasing()
+
+Separating detection from AI behavior keeps the detection mechanism independent from the enemy state logic.
+
+---
+
+# 10. Enemy Stomp System
+
+The enemy has a dedicated head hitbox.
+
+Enemy
+├── Body
+├── BodyCollider
+└── HeadHitbox
+
+The head hitbox checks whether the player is falling onto the enemy.
+
+The intended interaction is:
+
+Player jumping
+      ↓
+Player falling
+      ↓
+Player hits enemy head
+      ↓
+Enemy dies
+
+This keeps the enemy's death logic separate from the detection of the stomp.
+
+---
+
+# 11. Scene Architecture
+
+The project uses three main scenes.
+
+```text
+Scenes
+│
+├── MainMenu
+├── Loader
+└── Game
+```
+
+## MainMenu
+
+Contains:
+
+* Main menu UI
+* New Game button
+* Continue button
+* Quit button
+* MainMenuManager
+
+Flow:
+
+New Game
+    ↓
+GameManager.StartNewGame()
+
+Continue
+    ↓
+GameManager.ContinueGame()
+
+---
+
+## Loader
+
+The Loader scene exists to handle asynchronous loading of the gameplay scene.
+
+MainMenu
+    ↓
+Loader
+    ↓
+Game
+
+This allows the project to later add:
+
+* Loading UI
+* Loading progress
+* Additional initialization
+
+without putting loading logic inside the main menu.
+
+---
+
+## Game
+
+Contains the actual gameplay systems:
+
+Game
+├── GameManager
+├── SaveManager
+├── CoinManager
+├── CheckpointManager
+├── Player
+├── Enemies
+├── Coins
+├── Checkpoints
+├── Level
+└── LevelEndPoint
+
+---
+
+# 12. Level End
+
+The level contains an `EndPoint` trigger.
+
+```text
+Player
+   ↓
+EndPoint trigger
+   ↓
+GameManager.CompleteLevel()
+   ↓
+Level Complete
+
+The endpoint only detects the player.
+
+The `GameManager` is responsible for deciding what happens after the level is completed.
+
+This keeps the endpoint independent from scene-management logic.
+
+---
+
+# 13. Camera
+
+The project uses **Cinemachine 3.1.7** for the player-follow camera.
+
+The main camera contains:
+
+```text
+Main Camera
+└── CinemachineBrain
+```
+
+The Cinemachine Camera uses the player as its tracking target.
+
+This separates camera behavior from the player movement system.
+
+---
+
+# 14. Input System
+
+The project uses Unity's **New Input System**.
+
+Player input is handled through the generated input actions.
+
+Main actions include:
+
+Move
+Jump
+
+
+The player controller converts the input into movement and jump behavior.
+
+---
+
+# 15. Player Movement
+
+The player uses Unity's:
+
+
+CharacterController
+
+instead of Rigidbody-based movement.
+
+Responsibilities of `PlayerController` include:
+
+* Reading movement input
+* Horizontal movement
+* Gravity
+* Jumping
+
+The player movement system is independent from:
+
+* Health
+* Coins
+* Checkpoints
+* Enemy AI
+* Save system
+
+---
+
+# 16. Technologies
+
+* Unity 6
+* C#
+* Unity New Input System
+* Unity AI Navigation / NavMesh
+* Cinemachine 3.1.7
+* TextMeshPro
+* JSON serialization
+* CharacterController
+
+---
+
+# 17. Design Decisions
+
+### Component separation
+
+Gameplay systems are separated by responsibility instead of placing all functionality inside one player or game manager class.
+
+### Centralized save system
+
+Save/load operations are centralized inside `SaveManager`.
+
+Saveable systems implement:
+
+```text
+ISaveable
+```
+
+This prevents individual objects from directly managing save files.
+
+### Persistent IDs
+
+Coins and checkpoints use unique IDs so their state can be restored correctly after loading.
+
+### Event/trigger-based interactions
+
+Interactions such as:
+
+* Coin collection
+* Checkpoint activation
+* Enemy detection
+* Level completion
+
+are handled through Unity collision/trigger events.
+
+### Inheritance where behavior is shared
+
+The base `Enemy` class contains shared patrol functionality while `EnemyAI` extends it with specialized behavior.
+
+---
+
+# 18. How to Run
+
+1. Open the project in Unity.
+2. Open the `MainMenu` scene.
+3. Enter Play Mode.
+4. Select:
+
+   * **New Game** to start a new save.
+   * **Continue** to load the existing save.
+5. Play through the level.
+6. Collect coins and activate checkpoints.
+7. Reach the level endpoint to complete the level.
+
+---
+
+# 19. Project Structure
+
+Recommended project organization:
+
+```text
+Assets
+│
+├── Scenes
+│   ├── MainMenu.unity
+│   ├── Loader.unity
+│   └── Game.unity
+│
+├── Scripts
+│   ├── Core
+│   │   ├── GameManager.cs
+│   │   ├── SaveManager.cs
+│   │   ├── SaveData.cs
+│   │   └── ISaveable.cs
+│   │
+│   ├── Player
+│   │   ├── PlayerController.cs
+│   │   ├── PlayerRespawn.cs
+│   │   └── PlayerHealth.cs
+│   │
+│   ├── Enemy
+│   │   ├── Enemy.cs
+│   │   ├── EnemyDumb.cs
+│   │   ├── EnemyAI.cs
+│   │   ├── EnemyDetection.cs
+│   │   └── EnemyHeadHit.cs
+│   │
+│   ├── Collectibles
+│   │   ├── Coin.cs
+│   │   └── CoinManager.cs
+│   │
+│   ├── Checkpoint
+│   │   ├── Checkpoint.cs
+│   │   └── CheckpointManager.cs
+│   │
+│   ├── Level
+│   │   └── LevelEndPoint.cs
+│   │
+│   └── UI
+│       └── ...
+│
+└── Prefabs
+    ├── Player
+    ├── Enemy
+    ├── Coin
+    └── Checkpoint
+```
+
+---
+
+# 20. Summary
+
+The project is designed around small, focused components.
+
+The main architecture can be summarized as:
+
+```text
+                    GameManager
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+     Scene Flow      SaveManager     Game State
+                         │
+                      SaveData
+                         │
+             ┌───────────┴───────────┐
+             │                       │
+       CoinManager            CheckpointManager
+             │                       │
+           Coins                 Checkpoint
+             
+Player
+├── PlayerController
+├── PlayerRespawn
+└── PlayerHealth
+
+Enemy
+├── Enemy
+├── EnemyAI
+├── EnemyDetection
+└── EnemyHeadHit
+
+Level
+└── LevelEndPoint
+```
+
+The main design goal is to keep each class responsible for one clear part of the game while allowing systems to communicate without becoming tightly coupled.
